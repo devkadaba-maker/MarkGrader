@@ -1,0 +1,475 @@
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grade Calculator & Rank Tracker</title>
+    
+    <!-- 1. Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. Load jStat for statistical calculations (the "bell curve" math) -->
+    <script src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
+    
+    <!-- 3. Configure Tailwind to use the 'Inter' font -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+    
+    <!-- 4. Add some basic styles -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Style for number inputs (hides arrows) */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+
+        /* --- NEW PRINT STYLES --- */
+        @media print {
+            /* Hide non-essential parts */
+            body > .container > header, 
+            body > .container > .grid > div:first-child, /* Calculator column */
+            #results-container, /* Results box */
+            #print-btn, /* Print button itself */
+            #results-table th:last-child, /* Action header */
+            #results-table td:last-child, /* Action cells (delete buttons) */
+            #no-results-msg /* "No results" message */
+            {
+                display: none;
+            }
+
+            /* Reset body and main container for printing */
+            body, .container {
+                padding: 0;
+                margin: 0;
+                background-color: #fff;
+            }
+            
+            /* Ensure the table container and its parent div take up the space */
+            body > .container > .grid {
+                display: block; /* Remove grid layout for print */
+            }
+            
+            body > .container > .grid > div:last-child {
+                padding: 0;
+                margin: 0;
+            }
+            
+            #table-container, .bg-white {
+                padding: 0;
+                margin: 0;
+                box-shadow: none;
+                border: none;
+            }
+            
+            /* Ensure table borders are visible for print */
+            #results-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            #results-table th, #results-table td {
+                border: 1px solid #999;
+                padding: 8px;
+            }
+            h2 {
+                font-size: 1.5rem;
+                font-weight: 600;
+                margin-bottom: 1rem;
+            }
+        }
+        /* --- END PRINT STYLES --- */
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-900 p-4 md:p-8">
+
+    <div class="container mx-auto max-w-5xl">
+        <header class="mb-8">
+            <h1 class="text-4xl font-bold text-slate-800">Grade & Rank Calculator</h1>
+            <p class="text-lg text-slate-600 mt-2">Enter your scores to find your percentile and rank based on a bell curve.</p>
+        </header>
+
+        <!-- Main layout: Calculator on the left, results on the right -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            <!-- Column 1: Calculator Form -->
+            <div class="bg-white p-6 rounded-lg shadow-lg space-y-4">
+                <h2 class="text-2xl font-semibold mb-4 text-blue-700">1. Calculate Your Rank</h2>
+                
+                <form id="calcForm" class="space-y-4">
+                    <div>
+                        <label for="subjectName" class="block text-sm font-medium text-slate-700 mb-1">Subject Name</label>
+                        <input type="text" id="subjectName" placeholder="e.g., Math, Science" class="w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="userScore" class="block text-sm font-medium text-slate-700 mb-1">Your Score</label>
+                            <input type="number" step="any" id="userScore" placeholder="e.g., 106" class="w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                         <div>
+                            <label for="mean" class="block text-sm font-medium text-slate-700 mb-1">Mean (Average)</label>
+                            <input type="number" step="any" id="mean" placeholder="e.g., 95" class="w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label for="totalPeople" class="block text-sm font-medium text-slate-700 mb-1">Total People (e.g., 200)</label>
+                        <input type="number" id="totalPeople" placeholder="e.g., 200" class="w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                    </div>
+
+                    <!-- Constraint Fieldset -->
+                    <fieldset class="border-2 border-slate-200 p-4 rounded-md">
+                        <legend class="text-base font-semibold text-slate-800 px-2">Top Group Constraint</legend>
+                        <p class="text-sm text-slate-500 mb-3">Used to find the score distribution (std. dev).</p>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="topGroupSize" class="block text-sm font-medium text-slate-700 mb-1">How many people?</label>
+                                <input type="number" id="topGroupSize" placeholder="e.g., 20" class="w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                            </div>
+                            <div>
+                                <label for="topGroupScore" class="block text-sm font-medium text-slate-700 mb-1">Scored above...?</label>
+                                <input type="number" step="any" id="topGroupScore" placeholder="e.g., 114" class="w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- Error Message Area -->
+                    <div id="error-message" class="text-red-600 font-medium text-sm mt-2 hidden"></div>
+
+                    <button type="submit" class="w-full bg-blue-600 text-white py-3 px-4 rounded-md font-semibold text-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-150 shadow-md">
+                        Calculate
+                    </button>
+                </form>
+            </div>
+
+            <!-- Column 2: Results and Table -->
+            <div class="space-y-8">
+                
+                <!-- Results Display Box -->
+                <div id="results-container" class="bg-white p-6 rounded-lg shadow-lg hidden">
+                    <h2 class="text-2xl font-semibold mb-4 text-green-700">Calculation Complete</h2>
+                    <div class="space-y-3">
+                        <!-- NEW: Grade Row -->
+                        <div class="flex justify-between items-baseline border-b pb-3 mb-3">
+                            <span class="text-lg font-medium text-slate-700">Your Grade:</span>
+                            <span id="result-grade" class="text-2xl font-bold text-blue-700"></span>
+                        </div>
+                        <!-- END NEW -->
+                        <div class="flex justify-between items-baseline">
+                            <span class="text-lg font-medium text-slate-700">Your Percentile:</span>
+                            <span id="result-percentile" class="text-2xl font-bold text-slate-900"></span>
+                        </div>
+                        <div class="flex justify-between items-baseline">
+                            <span class="text-lg font-medium text-slate-700">Your Rank:</span>
+                            <span id="result-rank" class="text-2xl font-bold text-slate-900"></span>
+                        </div>
+                        <div class="flex justify-between items-baseline border-t pt-3 mt-3">
+                            <span class="text-sm font-medium text-slate-500">Calculated Std. Dev:</span>
+                            <span id="result-stddev" class="text-sm font-mono text-slate-600"></span>
+                        </div>
+                    </div>
+                    <button id="add-to-table-btn" class="w-full bg-green-600 text-white py-3 px-4 rounded-md font-semibold text-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all duration-150 shadow-md mt-6">
+                        + Add to Results Table
+                    </button>
+                </div>
+                
+                <!-- Saved Results Table -->
+                <div class="bg-white p-6 rounded-lg shadow-lg">
+                    <!-- MODIFIED: Added flex layout and print button -->
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-semibold text-blue-700">2. Saved Results</h2>
+                        <button id="print-btn" class="bg-slate-500 text-white py-2 px-4 rounded-md font-semibold text-sm hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition-all duration-150 shadow-md hidden">
+                            Print Results
+                        </button>
+                    </div>
+                    <!-- END MODIFICATION -->
+                    <div id="table-container" class="overflow-x-auto">
+                        <p id="no-results-msg" class="text-slate-500 text-center py-4">No results saved yet.</p>
+                        <table class="w-full text-left hidden min-w-[400px]" id="results-table">
+                            <thead class="border-b-2 border-slate-300">
+                                <tr>
+                                    <th class="p-2 text-sm font-semibold uppercase text-slate-600">Subject</th>
+                                    <th class="p-2 text-sm font-semibold uppercase text-slate-600">Score</th>
+                                    <!-- NEW: Grade Column -->
+                                    <th class="p-2 text-sm font-semibold uppercase text-slate-600">Grade</th>
+                                    <!-- END NEW -->
+                                    <th class="p-2 text-sm font-semibold uppercase text-slate-600">Percentile</th>
+                                    <th class="p-2 text-sm font-semibold uppercase text-slate-600">Rank</th>
+                                    <th class="p-2 text-sm font-semibold uppercase text-slate-600 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-tbody" class="divide-y divide-slate-200">
+                                <!-- JS will add rows here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- STATE ---
+            let currentResult = null; // Holds the most recent calculation
+            let resultsList = [];     // Holds all results added to the table
+
+            // --- DOM SELECTORS ---
+            const calcForm = document.getElementById('calcForm');
+            const errorMessage = document.getElementById('error-message');
+            
+            // Input fields
+            const subjectNameInput = document.getElementById('subjectName');
+            const userScoreInput = document.getElementById('userScore');
+            const meanInput = document.getElementById('mean');
+            const totalPeopleInput = document.getElementById('totalPeople');
+            const topGroupSizeInput = document.getElementById('topGroupSize');
+            const topGroupScoreInput = document.getElementById('topGroupScore');
+
+            // Results display
+            const resultsContainer = document.getElementById('results-container');
+            const resultGrade = document.getElementById('result-grade'); // <-- NEW
+            const resultPercentile = document.getElementById('result-percentile');
+            const resultRank = document.getElementById('result-rank');
+            const resultStdDev = document.getElementById('result-stddev');
+            const addToTableBtn = document.getElementById('add-to-table-btn');
+
+            // Table
+            const resultsTable = document.getElementById('results-table');
+            const resultsTbody = document.getElementById('results-tbody');
+            const noResultsMsg = document.getElementById('no-results-msg');
+            const printBtn = document.getElementById('print-btn'); // <-- NEW
+
+            // --- EVENT LISTENERS ---
+            calcForm.addEventListener('submit', handleCalculate);
+            addToTableBtn.addEventListener('click', handleAddResult);
+            resultsTbody.addEventListener('click', handleDeleteRow);
+            printBtn.addEventListener('click', () => window.print()); // <-- NEW
+
+            // --- FUNCTIONS ---
+
+            /**
+             * Handles the form submission for calculation.
+             */
+            function handleCalculate(e) {
+                e.preventDefault();
+                hideError();
+                resultsContainer.classList.add('hidden');
+                currentResult = null;
+
+                // 1. Get and parse all input values
+                const subject = subjectNameInput.value.trim();
+                const userScore = parseFloat(userScoreInput.value);
+                const mean = parseFloat(meanInput.value);
+                const totalPeople = parseInt(totalPeopleInput.value, 10);
+                const topGroupSize = parseInt(topGroupSizeInput.value, 10);
+                const topGroupScore = parseFloat(topGroupScoreInput.value);
+
+                // 2. Validate inputs
+                if (!subject) {
+                    return showError("Please enter a subject name.");
+                }
+                if (isNaN(userScore) || isNaN(mean) || isNaN(totalPeople) || isNaN(topGroupSize) || isNaN(topGroupScore)) {
+                    return showError("All fields must be valid numbers.");
+                }
+                if (totalPeople <= 0 || topGroupSize <= 0) {
+                    return showError("Total people and group size must be greater than 0.");
+                }
+                if (topGroupSize >= totalPeople) {
+                    return showError("Top group size must be smaller than total people.");
+                }
+
+                try {
+                    // 3. Perform the statistical calculation
+                    const calculation = calculateRank(userScore, mean, totalPeople, topGroupSize, topGroupScore);
+                    
+                    if (calculation.error) {
+                        return showError(calculation.error);
+                    }
+
+                    // 3.5. Get grade from percentile
+                    const grade = getGradeFromPercentile(calculation.percentile); // <-- NEW
+
+                    // 4. Display the results
+                    resultGrade.textContent = grade; // <-- NEW
+                    resultPercentile.textContent = `${calculation.percentile.toFixed(2)}th`;
+                    resultRank.textContent = `${calculation.rank}th`;
+                    resultStdDev.textContent = calculation.stdDev.toFixed(3);
+                    resultsContainer.classList.remove('hidden');
+
+                    // 5. Store this result in our temporary state
+                    currentResult = {
+                        id: Date.now(), // Unique ID for deletion
+                        subject: subject,
+                        score: userScore,
+                        grade: grade, // <-- NEW
+                        percentile: calculation.percentile,
+                        rank: calculation.rank
+                    };
+
+                } catch (err) {
+                    console.error(err);
+                    showError("An unexpected error occurred. Check console for details.");
+                }
+            }
+
+            // <-- NEW FUNCTION -->
+            /**
+             * Determines the grade based on the percentile.
+             * Based on HD (90+), D (70+), C (40+), PM (20+), P (10+).
+             */
+            function getGradeFromPercentile(percentile) {
+                if (percentile >= 90) return 'High Distinction (HD)';
+                if (percentile >= 70) return 'Distinction (D)';
+                if (percentile >= 40) return 'Credit (C)';
+                if (percentile >= 20) return 'Pass Marginal (PM)';
+                if (percentile >= 10) return 'Pass (P)';
+                return 'Fail (F)';
+            }
+            // <-- END NEW FUNCTION -->
+
+
+            /**
+             * The core "bell curve" logic.
+             */
+            function calculateRank(score, mean, total, topSize, topScore) {
+                // Find the percentile for the constraint score
+                const percentAbove = topSize / total;
+                const percentileConstraint = 1 - percentAbove;
+
+                if (percentileConstraint === 0.5) {
+                    return { error: "Constraint cannot be exactly at the 50th percentile (the mean)." };
+                }
+
+                // Get Z-score for the 90th percentile (for example)
+                const zConstraint = jStat.normal.inv(percentileConstraint, 0, 1);
+
+                // Calculate the standard deviation: stdDev = (X - mean) / Z
+                const stdDev = (topScore - mean) / zConstraint;
+
+                if (stdDev <= 0) {
+                    return { error: "Invalid constraint. Top group's score must be on the correct side of the mean." };
+                }
+
+                // Find the Z-score for the user's score
+                const zUser = (score - mean) / stdDev;
+
+                // Find the user's percentile
+                const percentileUser = jStat.normal.cdf(zUser, 0, 1);
+
+                // Find how many people are *above* the user
+                const peopleAbove = (1 - percentileUser) * total;
+
+                // Rank is (people above) + 1
+                const rank = Math.floor(peopleAbove) + 1;
+
+                return {
+                    percentile: percentileUser * 100,
+                    rank: rank,
+                    stdDev: stdDev
+                };
+            }
+
+            /**
+             * Adds the `currentResult` to the `resultsList` and re-renders the table.
+             */
+            function handleAddResult() {
+                if (!currentResult) return;
+
+                resultsList.push(currentResult);
+                currentResult = null; // Clear temp result
+
+                // Hide results box and reset form
+                resultsContainer.classList.add('hidden');
+                calcForm.reset();
+                subjectNameInput.focus();
+
+                renderTable();
+            }
+
+            /**
+             * Handles deleting a row using event delegation.
+             */
+            function handleDeleteRow(e) {
+                const deleteBtn = e.target.closest('.delete-btn');
+                if (!deleteBtn) return;
+
+                const rowId = deleteBtn.dataset.id;
+                
+                // Filter out the item with the matching ID
+                resultsList = resultsList.filter(item => item.id.toString() !== rowId);
+                
+                renderTable();
+            }
+
+            /**
+             * Re-draws the entire results table from the `resultsList` array.
+             */
+            function renderTable() {
+                // Clear the table body
+                resultsTbody.innerHTML = '';
+
+                if (resultsList.length === 0) {
+                    resultsTable.classList.add('hidden');
+                    noResultsMsg.classList.remove('hidden');
+                    printBtn.classList.add('hidden'); // <-- NEW: Hide print btn
+                } else {
+                    resultsTable.classList.remove('hidden');
+                    noResultsMsg.classList.add('hidden');
+                    printBtn.classList.remove('hidden'); // <-- NEW: Show print btn
+
+                    resultsList.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'border-b border-slate-200 hover:bg-slate-50 transition-colors';
+                        
+                        tr.innerHTML = `
+                            <td class="p-3 font-medium">${item.subject}</td>
+                            <td class="p-3">${item.score}</td>
+                            <td class="p-3 font-medium text-blue-700">${item.grade}</td> <!-- NEW -->
+                            <td class="p-3">${item.percentile.toFixed(2)}th</td>
+                            <td class="p-3 font-semibold">${item.rank}th</td>
+                            <td class="p-3 text-right">
+                                <button class="delete-btn text-red-500 hover:text-red-700 font-medium text-sm" data-id="${item.id}">
+                                    Delete
+                                </button>
+                            </td>
+                        `;
+                        resultsTbody.appendChild(tr);
+                    });
+                }
+            }
+
+            /**
+             * Shows an error message in the form.
+             */
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorMessage.classList.remove('hidden');
+            }
+
+            /**
+             * Hides the error message.
+             */
+            function hideError() {
+                errorMessage.classList.add('hidden');
+            }
+        });
+    </script>
+
+</body>
+</html>
